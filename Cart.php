@@ -13,15 +13,15 @@ use yii\web\Session;
  *
  * @property integer $count Total count of items in the cart
  * @property integer $cost Total cost of items in the cart
- * @property string $hash
- * @property boolean $isEmpty
- * @property boolean $isSaved Returns true if cart already saved to db, otherwise return false
- * @property string $serialized
+ * @property string $hash Unique hash value of the cart instance
+ * @property Model $info Cart information
+ * @property boolean $isEmpty Whether cart is empty
+ * @property string $serialized Storable representation of the cart data
  */
-class ShoppingCart extends Component
+class ShoppingCart extends Component implements CartInterface
 {
     /**
-     * Model that represent cart data after saved to database
+     * Model that represent cart information
      * @var string|Model
      */
     protected $model = '';
@@ -66,7 +66,11 @@ class ShoppingCart extends Component
     public function add($item, $quantity = 1)
     {
         $this->trigger(CartEvent::BEFORE_CART_CHANGE, new CartEvent([
-            'item' => $this->items[$item->getId()],
+            'item' => $item,
+        ]));
+
+        $this->trigger(CartEvent::BEFORE_ITEM_ADD, new CartEvent([
+            'item' => $item,
         ]));
 
         if (isset($this->items[$item->getId()])) {
@@ -78,12 +82,12 @@ class ShoppingCart extends Component
             $this->items[$item->getId()] = $item;
         }
 
-        $this->trigger(CartEvent::ITEM_ADD, new CartEvent([
-            'item' => $this->items[$item->getId()],
+        $this->trigger(CartEvent::AFTER_ITEM_ADD, new CartEvent([
+            'item' => $item,
         ]));
 
         $this->trigger(CartEvent::AFTER_CART_CHANGE, new CartEvent([
-            'item' => $this->items[$item->getId()],
+            'item' => $item,
         ]));
 
         if ($this->storeInSession) {
@@ -92,6 +96,8 @@ class ShoppingCart extends Component
     }
 
     /**
+     * Returns items count in the cart
+     *
      * @return integer
      */
     public function getCount()
@@ -106,36 +112,37 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Returns full cart cost as a sum of the individual items costs
+     * Returns total price of all items in the cart
      *
-     * @param $withDiscount
+     * @param boolean $withDiscount Whether to calculate discounted price
      * @return integer
      */
-    public function getCost($withDiscount = false)
+    public function getPrice($withDiscount = false)
     {
-        $cost = 0;
+        $price = 0;
 
         foreach ($this->items as $item) {
-            $cost += $item->getCost($withDiscount);
+            $price += $item->getPrice($withDiscount);
         }
 
-        $costEvent = new CostCalculationEvent([
-            'baseCost' => $cost,
+        $event = new CartEvent([
+            'baseCost' => $price,
         ]);
 
-        $this->trigger(CartEvent::COST_CALCULATION, $costEvent);
+        $this->trigger(CartEvent::PRICE_CALCULATION, $event);
 
         if ($withDiscount) {
-            $cost = max(0, $cost - $costEvent->discountValue);
+            $price = max(0, $price - $event->discount);
         }
 
-        return $cost;
+        return $price;
     }
 
     /**
-     * Returns hash (md5) of the current cart, that is unique to the current combination of items,
-     * quantities and costs. This helps us fast compare if two carts are the same, or not, also
-     * we can detect if cart is changed (comparing hash to the one's saved somewhere)
+     * Returns md5 hash of the current cart instance that is unique to the current combination of information,
+     * items, quantities and costs.
+     * The hash can be used to compare whether two carts are the same, or not. We can also detect if cart was changed 
+     * by comparing current hash to the old one
      *
      * @return string
      */
@@ -169,24 +176,6 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Returns true if cart already saved to db
-     *
-     * @return boolean
-     */
-    public function getIsSaved()
-    {
-        if (!$this->info->id) {
-            return false;
-        }
-
-        $count = Order::find()
-            ->where(['id' => $this->info->id])
-            ->count();
-
-        return $count != 0;
-    }
-
-    /**
      * Returns all items in the cart
      *
      * @return CartItemInterface[]
@@ -212,7 +201,7 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Returns cart items as a storable representation of a value
+     * Returns cart data as a storable representation of a value
      *
      * @return string
      */
@@ -227,8 +216,8 @@ class ShoppingCart extends Component
     /**
      * Checks whether cart item exists or not
      *
-     * @param string $id
-     * @return bool
+     * @param string $id Id of an item to check
+     * @return boolean
      */
     public function hasItem($id)
     {
@@ -236,12 +225,11 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Loads cart from session
+     * Loads cart data from session
      */
     public function loadFromSession()
     {
         $this->session = Instance::ensure($this->session, Session::className());
-        $this->model = Instance::ensure($this->model, Order::className());
 
         if (isset($this->session[$this->cartId])) {
             $this->setSerialized($this->session[$this->cartId]);
@@ -249,19 +237,20 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Process payment
+     * Process payment. Returns true if payment operation is successful
      *
      * @return boolean
      */
     public function pay()
     {
+        // Add logic here to process payment
         return true;
     }
 
     /**
-     * Removes item from the cart
+     * Removes an item from the cart
      *
-     * @param CartItemInterface $item
+     * @param CartItemInterface $item Item to remove
      */
     public function remove($item)
     {
@@ -273,9 +262,13 @@ class ShoppingCart extends Component
      */
     public function removeAll()
     {
+        $event = new CartEvent;
+
+        $this->trigger(CartEvent::BEFORE_REMOVE_ALL, $event);
+
         $this->items = [];
 
-        $this->trigger(CartEvent::REMOVE_ALL, new CartEvent);
+        $this->trigger(CartEvent::AFTER_REMOVE_ALL, $event);
 
         if ($this->storeInSession) {
             $this->saveToSession();
@@ -283,21 +276,28 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Removes item from the cart by ID
+     * Removes an item from the cart by it's id
      *
-     * @param string $id
+     * @param integer $id
      */
     public function removeById($id)
     {
-        $this->trigger(CartEvent::BEFORE_ITEM_REMOVE, new CartEvent([
-            'item' => $this->items[$id],
-        ]));
+        if (!isset($this->items[$id])) {
+            return;
+        }
 
-        $this->trigger(CartEvent::AFTER_CART_CHANGE, new CartEvent([
-            'item' => $this->items[$id],
-        ]));
+        $item = $this->items[$id];
+        $event = new CartEvent([
+            'item' => $item,
+        ]);
+
+        $this->trigger(CartEvent::BEFORE_CART_CHANGE, $event);
+        $this->trigger(CartEvent::BEFORE_ITEM_REMOVE, $event);
 
         unset($this->items[$id]);
+
+        $this->trigger(CartEvent::AFTER_ITEM_REMOVE, $event);
+        $this->trigger(CartEvent::AFTER_CART_CHANGE, $event);
 
         if ($this->storeInSession) {
             $this->saveToSession();
@@ -314,79 +314,7 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Sends notification about new transaction checkout
-     */
-    public function sendCheckoutNotification()
-    {
-        $info = $this->info;
-
-        // Send notification to user
-        $from = Yii::$app->params['adminEmail'];
-        $to = $info->email;
-        $subject = '[Golden Rama] Detail Pesanan Anda dengan No ' . $info->no;
-
-        Yii::$app->mailer->compose('user-notification-new-checkout', [
-            'order' => $info,
-            'paymentType' => $this->paymentType,
-        ])
-            ->setFrom($from)
-            ->setTo($to)
-            ->setSubject($subject)
-            ->send();
-
-        // Send notification to admin
-        $from = Yii::$app->params['adminEmail'];
-        $to = Yii::$app->params['adminEmail'];
-        $subject = '[New Order] No. Pesanan ' . $info->no;
-
-        Yii::$app->mailer->compose('admin-notification-new-checkout', [
-            'order' => $info,
-            'paymentType' => $this->paymentType,
-        ])
-            ->setFrom($from)
-            ->setTo($to)
-            ->setSubject($subject)
-            ->send();
-    }
-
-    /**
-     * Sends notification about successful transaction payment
-     */
-    public function sendPaidNotification()
-    {
-        $info = $this->info;
-
-        // Send notification to user
-        $from = Yii::$app->params['adminEmail'];
-        $to = $info->email;
-        $subject = '[Golden Rama] Pembayaran Berhasil Untuk No. Pesanan ' . $info->no;
-
-        Yii::$app->mailer->compose('user-notification-payment', [
-            'order' => $info,
-            'paymentType' => $this->paymentType,
-        ])
-            ->setFrom($from)
-            ->setTo($to)
-            ->setSubject($subject)
-            ->send();
-
-        // Send notification to admin
-        $from = Yii::$app->params['adminEmail'];
-        $to = Yii::$app->params['adminEmail'];
-        $subject = '[New Order] No. Pesanan ' . $info->no;
-
-        Yii::$app->mailer->compose('admin-notification-payment', [
-            'order' => $info,
-            'paymentType' => $this->paymentType,
-        ])
-            ->setFrom($from)
-            ->setTo($to)
-            ->setSubject($subject)
-            ->send();
-    }
-
-    /**
-     * Sets cart information. The information provided here is represent model's data for this cart.
+     * Sets cart information. The information provided here represents data of model for cart instance
      *
      * @param array $data
      */
@@ -400,12 +328,14 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Sets items in the cart
+     * Sets items in the cart. All items previously saved in the cart will be replaced by passed items
      *
      * @param CartItemInterface[] $items
      */
     public function setItems($items)
     {
+        $this->trigger(CartEvent::BEFORE_CART_CHANGE, new CartEvent);
+
         $this->items = array_filter($items, function (CartItemInterface $item) {
             return $item->quantity > 0;
         });
@@ -418,7 +348,7 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Sets cart from serialized string
+     * Sets cart data from serialized string
      *
      * @param string $serialized
      */
@@ -431,7 +361,7 @@ class ShoppingCart extends Component
     }
 
     /**
-     * Updates item in the cart
+     * Updates an item in the cart
      *
      * @param CartItemInterface $item
      * @param int $quantity
@@ -443,6 +373,12 @@ class ShoppingCart extends Component
             return;
         }
 
+        $event = new CartEvent([
+            'item' => $item,
+        ]);
+
+        $this->trigger(CartEvent::BEFORE_CART_CHANGE, $event);
+
         if (isset($this->items[$item->getId()])) {
             $this->items[$item->getId()]->setQuantity($quantity);
         } else {
@@ -450,46 +386,12 @@ class ShoppingCart extends Component
             $this->items[$item->getId()] = $item;
         }
 
-        $this->trigger(CartEvent::ITEM_UPDATE, new CartEvent([
-            'item' => $this->items[$item->getId()],
-        ]));
-
-        $this->trigger(CartEvent::AFTER_CART_CHANGE, new CartEvent([
-            'item' => $this->items[$item->getId()],
-        ]));
+        $this->trigger(CartEvent::ITEM_UPDATE, $event);
+        $this->trigger(CartEvent::AFTER_CART_CHANGE, $event);
 
         if ($this->storeInSession) {
             $this->saveToSession();
         }
-    }
-
-    /**
-     * Saves cart to database
-     *
-     * @return boolean whether save operation is successful or not
-     */
-    private function saveToDb()
-    {
-        $amount = $this->getCost(true);
-        $adminFee = $this->paymentType->getFee($amount);
-
-        $this->setInfo([
-            'payment_type_id' => $this->paymentType->id,
-            'amount' => $amount,
-            'admin_fee' => $adminFee,
-            'final_amount' => $amount + $adminFee,
-            'no' => Order::generateOrderNumber(),
-        ]);
-
-        $success = $this->info->save();
-
-        foreach ($this->items as $item) {
-            $item->order_id = $this->info->id;
-
-            $success = $item->save();
-        }
-
-        return $success;
     }
 
 }
