@@ -7,11 +7,5 @@ namespace nicklaros\yii2cart;
  */
 interface CartInterface
 {
-    /**
-     * Process payment. Returns true if payment operation is successful
-     *
-     * @return boolean
-     */
-    public function pay();
-
+    
 }
