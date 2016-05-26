@@ -126,7 +126,7 @@ class Cart extends Component implements CartInterface
         }
 
         $event = new CartEvent([
-            'baseCost' => $price,
+            'price' => $price,
         ]);
 
         $this->trigger(CartEvent::PRICE_CALCULATION, $event);
