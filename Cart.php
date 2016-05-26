@@ -9,7 +9,7 @@ use yii\di\Instance;
 use yii\web\Session;
 
 /**
- * Class ShoppingCart
+ * Class Cart
  *
  * @property integer $count Total count of items in the cart
  * @property integer $cost Total cost of items in the cart
@@ -18,7 +18,7 @@ use yii\web\Session;
  * @property boolean $isEmpty Whether cart is empty
  * @property string $serialized Storable representation of the cart data
  */
-class ShoppingCart extends Component implements CartInterface
+class Cart extends Component implements CartInterface
 {
     /**
      * Model that represent cart information
