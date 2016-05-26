@@ -1,0 +1,23 @@
+{
+  "name": "nicklaros/yii2-cart",
+  "description": "Cart extension for yii2",
+  "keywords": ["yii2", "extension", "cart"],
+  "homepage": "https://github.com/nicklaros/yii2-cart",
+  "type": "yii2-extension",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Nick Laros",
+      "email": "nicklaros@gmail.com"
+    }
+  ],
+  "require": {
+    "yiisoft/yii2": ">=2.0.0",
+    "mpdf/mpdf": "<7.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "nicklaros\\yii2cart\\": ""
+    }
+  }
+}
