@@ -320,7 +320,9 @@ class Cart extends Component implements CartInterface
      */
     public function setInfo($data)
     {
-        $this->model->attributes = $data;
+        foreach ($data as $key => $value) {
+            $this->model->$key = $value;
+        }
 
         if ($this->storeInSession) {
             $this->saveToSession();
