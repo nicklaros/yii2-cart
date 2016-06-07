@@ -4,6 +4,7 @@ namespace nicklaros\yii2cart;
 
 use Yii;
 use yii\base\Component;
+use yii\base\Exception;
 use yii\base\Model;
 use yii\di\Instance;
 use yii\web\Session;
@@ -149,6 +150,7 @@ class Cart extends Component implements CartInterface
     public function getHash()
     {
         $data = [];
+        $data[] = $this->info;
 
         foreach ($this->items as $item) {
             $data[] = [$item->getId(), $item->getQuantity(), $item->getPrice()];
@@ -320,6 +322,10 @@ class Cart extends Component implements CartInterface
      */
     public function setInfo($data)
     {
+        if (empty($this->model)) {
+            throw new Exception('Cart model for saving information is not configured');
+        }
+
         foreach ($data as $key => $value) {
             $this->model->$key = $value;
         }
